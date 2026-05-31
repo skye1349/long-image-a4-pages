@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>长图A4分页打印工具</title>
+<link rel="icon" href="data:,">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f5f4f0;
+    color: #1a1a1a;
+    min-height: 100vh;
+  }
+  header {
+    background: #fff;
+    border-bottom: 1px solid #e5e4e0;
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  header h1 { font-size: 15px; font-weight: 600; }
+  header span { font-size: 13px; color: #888; }
+
+  #drop-zone {
+    margin: 48px auto;
+    max-width: 520px;
+    border: 2px dashed #ccc;
+    border-radius: 12px;
+    padding: 60px 40px;
+    text-align: center;
+    cursor: pointer;
+    background: #fff;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  #drop-zone:hover, #drop-zone.drag-over {
+    border-color: #555;
+    background: #fafaf8;
+  }
+  #drop-zone input { display: none; }
+  #drop-zone .icon { font-size: 36px; margin-bottom: 12px; }
+  #drop-zone .title { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+  #drop-zone .hint { font-size: 13px; color: #888; }
+
+  #editor {
+    display: none;
+    height: calc(100vh - 53px);
+    overflow: hidden;
+  }
+  #canvas-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #zoom-bar {
+    background: #3a3a3a;
+    padding: 6px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  #zoom-bar label { font-size: 12px; color: #ccc; white-space: nowrap; }
+  #zoom-slider { flex: 1; max-width: 200px; accent-color: #fff; cursor: pointer; }
+  #zoom-val { font-size: 12px; color: #fff; font-weight: 600; min-width: 38px; }
+  #zoom-bar .zbtn {
+    background: rgba(255,255,255,0.12);
+    border: none;
+    color: #fff;
+    font-size: 16px;
+    width: 26px; height: 26px;
+    border-radius: 5px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #zoom-bar .zbtn:hover { background: rgba(255,255,255,0.25); }
+  #zoom-bar .zfit {
+    font-size: 11px;
+    background: rgba(255,255,255,0.12);
+    border: none;
+    color: #ccc;
+    padding: 3px 8px;
+    border-radius: 5px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  #zoom-bar .zfit:hover { background: rgba(255,255,255,0.25); color: #fff; }
+  #canvas-wrap {
+    flex: 1;
+    overflow: scroll;
+    background: #555;
+    cursor: crosshair;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 16px;
+    scrollbar-width: auto;
+  }
+  #canvas-wrap::-webkit-scrollbar { width: 14px; height: 14px; }
+  #canvas-wrap::-webkit-scrollbar-track { background: #3a3a3a; }
+  #canvas-wrap::-webkit-scrollbar-thumb { background: #888; border-radius: 7px; border: 2px solid #3a3a3a; }
+  #canvas-wrap::-webkit-scrollbar-thumb:hover { background: #bbb; }
+  #canvas-wrap::-webkit-scrollbar-corner { background: #3a3a3a; }
+  #canvas-inner {
+    position: relative;
+    flex-shrink: 0;
+    transform-origin: top center;
+  }
+  #img-canvas { display: block; }
+
+  .cut-line {
+    position: absolute;
+    left: 0; right: 0;
+    height: 0;
+    border-top: 3px solid #ef4444;
+    cursor: ns-resize;
+    z-index: 10;
+  }
+  .cut-line .cut-label {
+    position: absolute;
+    right: 8px;
+    top: 4px;
+    font-size: 20px;
+    color: #ef4444;
+    background: rgba(255,255,255,0.92);
+    padding: 2px 10px;
+    border-radius: 4px;
+    white-space: nowrap;
+    pointer-events: none;
+    font-family: -apple-system, sans-serif;
+  }
+  .cut-line .del-btn {
+    position: absolute;
+    left: 8px;
+    top: -18px;
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: #ef4444;
+    color: white;
+    font-size: 22px;
+    border: none;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    line-height: 1;
+    font-family: sans-serif;
+  }
+  .cut-line .del-btn:hover { background: #b91c1c; }
+
+  .page-shade {
+    position: absolute;
+    left: 0; right: 0;
+    height: 0;
+    pointer-events: none;
+    z-index: 4;
+    border-top: 2px dashed rgba(255,210,0,0.75);
+  }
+
+  #sidebar {
+    width: 240px;
+    flex-shrink: 0;
+    background: #fff;
+    border-left: 1px solid #e5e4e0;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .s-section {
+    padding: 16px;
+    border-bottom: 1px solid #f0efeb;
+  }
+  .s-section h3 { font-size: 12px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; }
+  .stat-num { font-size: 28px; font-weight: 600; line-height: 1; }
+  .stat-unit { font-size: 13px; color: #888; margin-top: 2px; }
+  .a4-hint { font-size: 12px; color: #aaa; margin-top: 6px; }
+
+  .instruction { font-size: 13px; color: #555; line-height: 1.7; }
+  .instruction b { color: #1a1a1a; font-weight: 600; }
+
+  #cut-list { list-style: none; }
+  #cut-list li {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 0;
+    font-size: 13px;
+    border-bottom: 1px solid #f0efeb;
+    color: #333;
+  }
+  #cut-list li:last-child { border-bottom: none; }
+  #cut-list .lbl { color: #ef4444; font-weight: 500; }
+  #cut-list .pos { color: #888; font-size: 12px; }
+  #cut-list .rm { background: none; border: none; color: #ccc; cursor: pointer; font-size: 16px; padding: 0 2px; }
+  #cut-list .rm:hover { color: #ef4444; }
+  .empty-hint { font-size: 13px; color: #bbb; }
+
+  .btn-primary {
+    display: block;
+    width: calc(100% - 32px);
+    margin: 8px 16px;
+    padding: 11px;
+    background: #1a1a1a;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: center;
+  }
+  .btn-primary:hover { background: #333; }
+  .btn-primary:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  .btn-secondary {
+    display: block;
+    width: calc(100% - 32px);
+    margin: 0 16px 8px;
+    padding: 9px;
+    background: none;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 13px;
+    color: #555;
+    cursor: pointer;
+  }
+  .btn-secondary:hover { background: #f5f5f5; }
+
+  #status {
+    font-size: 12px;
+    color: #888;
+    text-align: center;
+    padding: 4px 16px 12px;
+    min-height: 28px;
+  }
+  #status.ok { color: #16a34a; }
+  #status.err { color: #ef4444; }
+
+  #progress-bar {
+    height: 3px;
+    background: #1a1a1a;
+    width: 0%;
+    transition: width 0.2s;
+    margin: 0 16px;
+    border-radius: 2px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>长图 A4 分页打印工具</h1>
+  <span>点击图片添加分割线 · 红线处分页 · 导出PDF直接打印</span>
+</header>
+
+<div id="drop-zone">
+  <label id="upload-label" for="file-input">
+    <div class="icon">🖼️</div>
+    <div class="title">点击选择图片，或拖拽到此处</div>
+    <div class="hint">支持 JPG / PNG 长图</div>
+  </label>
+  <input type="file" id="file-input" accept="image/jpeg,image/png,image/jpg,image/webp">
+</div>
+
+<div id="editor" style="display:none; flex-direction:row;">
+  <div id="canvas-area">
+    <div id="zoom-bar">
+      <label>缩放</label>
+      <button class="zbtn" id="btn-zoom-out">−</button>
+      <input type="range" id="zoom-slider" min="10" max="100" value="100" step="1">
+      <button class="zbtn" id="btn-zoom-in">+</button>
+      <span id="zoom-val">100%</span>
+      <button class="zfit" id="btn-fit">适应窗口</button>
+      <button class="zfit" id="btn-100">实际大小</button>
+    </div>
+    <div id="canvas-wrap">
+      <div id="canvas-inner">
+        <canvas id="img-canvas"></canvas>
+      </div>
+    </div>
+  </div>
+  <div id="sidebar">
+    <div class="s-section">
+      <h3>页数</h3>
+      <div class="stat-num" id="stat-pages">1</div>
+      <div class="stat-unit">页 A4</div>
+      <div class="a4-hint" id="a4-hint"></div>
+    </div>
+
+    <div class="s-section">
+      <h3>操作说明</h3>
+      <div class="instruction">
+        <b>点击图片</b> 添加红色分割线<br>
+        <b>拖动红线</b> 微调位置<br>
+        <b>避开表格</b>，在空白处分页<br>
+        黄色虚线 = A4参考高度
+      </div>
+    </div>
+
+    <div class="s-section" style="flex:1;">
+      <h3>分割线列表</h3>
+      <ul id="cut-list">
+        <li><span class="empty-hint">点击图片添加分割线</span></li>
+      </ul>
+    </div>
+
+    <div id="progress-bar"></div>
+    <button class="btn-secondary" id="btn-clear">清除所有分割线</button>
+    <button class="btn-primary" id="btn-export" disabled>导出 PDF</button>
+    <div id="status"></div>
+  </div>
+</div>
+
+<script>
+const fileInput = document.getElementById('file-input');
+const dropZone = document.getElementById('drop-zone');
+const editor = document.getElementById('editor');
+const canvasWrap = document.getElementById('canvas-wrap');
+const canvasInner = document.getElementById('canvas-inner');
+const imgCanvas = document.getElementById('img-canvas');
+const ctx = imgCanvas.getContext('2d');
+const statPages = document.getElementById('stat-pages');
+const a4Hint = document.getElementById('a4-hint');
+const cutList = document.getElementById('cut-list');
+const btnExport = document.getElementById('btn-export');
+const btnClear = document.getElementById('btn-clear');
+const statusEl = document.getElementById('status');
+const progressBar = document.getElementById('progress-bar');
+const zoomSlider = document.getElementById('zoom-slider');
+const zoomVal = document.getElementById('zoom-val');
+const btnZoomIn = document.getElementById('btn-zoom-in');
+const btnZoomOut = document.getElementById('btn-zoom-out');
+const btnFit = document.getElementById('btn-fit');
+const btn100 = document.getElementById('btn-100');
+
+let img = null;
+let cuts = [];
+let dragging = null;
+let dragStartClientY = 0;
+let dragStartCutY = 0;
+let imgNaturalW = 0, imgNaturalH = 0;
+let zoom = 1.0;
+
+// ── zoom helpers ──
+function applyZoom(z) {
+  zoom = Math.max(0.1, Math.min(1.0, z));
+  const pct = Math.round(zoom * 100);
+  zoomSlider.value = pct;
+  zoomVal.textContent = pct + '%';
+  // Scale the inner container via width/height (not transform) so scroll works naturally
+  canvasInner.style.width = Math.round(imgNaturalW * zoom) + 'px';
+  canvasInner.style.height = Math.round(imgNaturalH * zoom) + 'px';
+  imgCanvas.style.width = Math.round(imgNaturalW * zoom) + 'px';
+  imgCanvas.style.height = Math.round(imgNaturalH * zoom) + 'px';
+  renderAll();
+}
+
+function fitZoom() {
+  if (!img) return;
+  const availW = canvasWrap.clientWidth - 40; // minus padding
+  const z = Math.min(1.0, availW / imgNaturalW);
+  applyZoom(z);
+}
+
+zoomSlider.addEventListener('input', () => applyZoom(+zoomSlider.value / 100));
+btnZoomIn.addEventListener('click', () => applyZoom(zoom + 0.1));
+btnZoomOut.addEventListener('click', () => applyZoom(zoom - 0.1));
+btnFit.addEventListener('click', fitZoom);
+btn100.addEventListener('click', () => applyZoom(1.0));
+
+// wheel scrolls normally (Mac two-finger gesture)
+
+// ── file load ──
+fileInput.addEventListener('change', e => { if (e.target.files[0]) loadImage(e.target.files[0]); });
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith('image/')) loadImage(f);
+});
+
+function loadImage(file) {
+  const reader = new FileReader();
+  reader.onload = ev => {
+    img = new Image();
+    img.onload = () => {
+      imgNaturalW = img.naturalWidth;
+      imgNaturalH = img.naturalHeight;
+      imgCanvas.width = imgNaturalW;
+      imgCanvas.height = imgNaturalH;
+      ctx.drawImage(img, 0, 0);
+      dropZone.style.display = 'none';
+      editor.style.display = 'flex';
+      cuts = [];
+      setTimeout(fitZoom, 50); // after layout
+      updateSidebar();
+      setStatus('');
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── coordinate helpers ──
+function clientYtoImgPx(clientY) {
+  const innerRect = canvasInner.getBoundingClientRect();
+  const relY = clientY - innerRect.top + canvasWrap.scrollTop - canvasInner.offsetTop;
+  // canvas-inner is sized to imgNaturalW*zoom, so divide by zoom to get original px
+  return Math.round((clientY - innerRect.top) / zoom);
+}
+
+// ── click to add cut ──
+canvasWrap.addEventListener('click', e => {
+  if (dragging !== null) return;
+  if (e.target.classList.contains('del-btn')) return;
+  if (!img) return;
+  const y = clientYtoImgPx(e.clientY);
+  if (y < 3 || y > imgNaturalH - 3) return;
+  if (!cuts.includes(y)) {
+    cuts.push(y);
+    cuts.sort((a, b) => a - b);
+  }
+  renderAll();
+  updateSidebar();
+});
+
+// ── render overlays ──
+function renderAll() {
+  canvasInner.querySelectorAll('.cut-line, .page-shade').forEach(el => el.remove());
+  if (!img) return;
+
+  const a4PagePx = imgNaturalW * (297 / 210); // in original image pixels
+
+  // yellow A4 reference lines — position in scaled px
+  let refY = a4PagePx;
+  while (refY < imgNaturalH) {
+    const shade = document.createElement('div');
+    shade.className = 'page-shade';
+    shade.style.top = Math.round(refY * zoom) + 'px';
+    canvasInner.appendChild(shade);
+    refY += a4PagePx;
+  }
+
+  cuts.forEach((cutY, i) => {
+    const line = document.createElement('div');
+    line.className = 'cut-line';
+    line.style.top = Math.round(cutY * zoom) + 'px';
+
+    const lbl = document.createElement('div');
+    lbl.className = 'cut-label';
+    lbl.textContent = `分割线 ${i + 1}`;
+    line.appendChild(lbl);
+
+    const del = document.createElement('button');
+    del.className = 'del-btn';
+    del.textContent = '×';
+    del.title = '删除此分割线';
+    del.addEventListener('click', ev => {
+      ev.stopPropagation();
+      cuts.splice(i, 1);
+      renderAll();
+      updateSidebar();
+    });
+    line.appendChild(del);
+
+    line.addEventListener('mousedown', ev => {
+      if (ev.target === del) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      dragging = i;
+      dragStartClientY = ev.clientY;
+      dragStartCutY = cuts[i];
+    });
+
+    canvasInner.appendChild(line);
+  });
+}
+
+document.addEventListener('mousemove', e => {
+  if (dragging === null) return;
+  const delta = (e.clientY - dragStartClientY) / zoom;
+  let newY = Math.round(dragStartCutY + delta);
+  newY = Math.max(1, Math.min(imgNaturalH - 1, newY));
+  cuts[dragging] = newY;
+  cuts.sort((a, b) => a - b);
+  renderAll();
+  updateSidebar();
+});
+
+document.addEventListener('mouseup', () => { dragging = null; });
+window.addEventListener('resize', () => { if (img) renderAll(); });
+
+// ── sidebar ──
+function updateSidebar() {
+  const n = img ? cuts.length + 1 : 0;
+  statPages.textContent = n;
+  if (img) {
+    const a4PageH = Math.round(imgNaturalW * 297 / 210);
+    a4Hint.textContent = `建议每页高度约 ${a4PageH}px`;
+  }
+  if (!cuts.length) {
+    cutList.innerHTML = '<li><span class="empty-hint">点击图片添加分割线</span></li>';
+  } else {
+    // Build segments: [start, end] for each page
+    const boundaries = [0, ...cuts, imgNaturalH];
+    const items = cuts.map((cutY, i) => {
+      const segAbove = cutY - boundaries[i];       // height of page above this line
+      const segBelow = boundaries[i + 2] - cutY;   // height of page below this line
+      return `
+        <li>
+          <span>
+            <span class="lbl">线 ${i + 1}</span>
+            <span class="pos"> &nbsp;位置 ${cutY}px</span>
+          </span>
+          <button class="rm" data-i="${i}" title="删除">×</button>
+        </li>
+        <li style="background:#fafafa; padding: 3px 0 3px 8px;">
+          <span class="pos" style="font-size:11px;">
+            第${i + 1}页高 <b style="color:#333">${segAbove}px</b>
+            &nbsp;/&nbsp;
+            第${i + 2}页高 <b style="color:#333">${segBelow}px</b>
+          </span>
+        </li>
+      `;
+    });
+    cutList.innerHTML = items.join('');
+    cutList.querySelectorAll('.rm').forEach(btn => {
+      btn.addEventListener('click', () => {
+        cuts.splice(+btn.dataset.i, 1);
+        renderAll();
+        updateSidebar();
+      });
+    });
+  }
+  btnExport.disabled = !img;
+}
+
+btnClear.addEventListener('click', () => {
+  cuts = [];
+  renderAll();
+  updateSidebar();
+  setStatus('');
+});
+
+function setStatus(msg, type) {
+  statusEl.textContent = msg;
+  statusEl.className = type || '';
+}
+
+// ── export ──
+btnExport.addEventListener('click', async () => {
+  if (!img) return;
+  btnExport.disabled = true;
+  setStatus('正在生成PDF，请稍候...');
+  progressBar.style.width = '0%';
+  await new Promise(r => setTimeout(r, 30));
+  try {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    const segments = [];
+    let prev = 0;
+    for (const cutY of cuts) { segments.push([prev, cutY]); prev = cutY; }
+    segments.push([prev, imgNaturalH]);
+    for (let i = 0; i < segments.length; i++) {
+      const [sy, ey] = segments[i];
+      const segH = ey - sy;
+      if (segH <= 0) continue;
+      const offscreen = document.createElement('canvas');
+      offscreen.width = imgNaturalW;
+      offscreen.height = segH;
+      const oc = offscreen.getContext('2d');
+      oc.drawImage(img, 0, sy, imgNaturalW, segH, 0, 0, imgNaturalW, segH);
+      const dataUrl = offscreen.toDataURL('image/jpeg', 0.92);
+      const pageW = 210, pageH = 297;
+      const imgAspect = imgNaturalW / segH;
+      let drawW = pageW, drawH = pageW / imgAspect;
+      if (drawH > pageH) { drawH = pageH; drawW = pageH * imgAspect; }
+      const x = (pageW - drawW) / 2, y = (pageH - drawH) / 2;
+      if (i > 0) doc.addPage();
+      doc.addImage(dataUrl, 'JPEG', x, y, drawW, drawH);
+      progressBar.style.width = Math.round((i + 1) / segments.length * 100) + '%';
+      await new Promise(r => setTimeout(r, 10));
+    }
+    doc.save('分页打印.pdf');
+    setStatus(`✓ 已导出 ${segments.length} 页 PDF，查看下载文件夹`, 'ok');
+    progressBar.style.width = '100%';
+    setTimeout(() => { progressBar.style.width = '0%'; }, 2000);
+  } catch (err) {
+    setStatus('导出失败：' + err.message, 'err');
+    console.error(err);
+  }
+  btnExport.disabled = false;
+});
+</script>
+</body>
+</html>
